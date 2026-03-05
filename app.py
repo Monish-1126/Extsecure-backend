@@ -6,6 +6,7 @@ import requests
 import joblib
 import pandas as pd
 
+from fastapi.responses import JSONResponse
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -327,14 +328,19 @@ def analyze_extension(extension_id: str) -> dict:
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
     try:
-        return analyze_extension(req.extension_id)
-    except HTTPException as e:
-        raise e
+        result = analyze_extension(req.extension_id)
+        return result
 
-    except Exception:
-        raise HTTPException(
+    except HTTPException as e:
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"error": e.detail}
+        )
+
+    except Exception as e:
+        return JSONResponse(
             status_code=500,
-            detail="Extension analysis failed"
+            content={"error": "Extension analysis failed"}
         )
 @app.get("/health")
 def health():
