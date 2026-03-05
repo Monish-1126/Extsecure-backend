@@ -71,11 +71,29 @@ def download_crx(extension_id: str, out_path: str):
         f"&x=id%3D{extension_id}%26installsource%3Dondemand%26uc"
     )
 
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
+    try:
+        r = requests.get(url, timeout=20)
 
-    with open(out_path, "wb") as f:
-        f.write(r.content)
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=404,
+                detail="Extension not found in Chrome Web Store"
+            )
+
+        with open(out_path, "wb") as f:
+            f.write(r.content)
+
+    except requests.exceptions.Timeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Chrome Web Store request timed out"
+        )
+
+    except requests.exceptions.RequestException:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to download extension"
+        )
 
 
 # ======================================================
@@ -84,7 +102,10 @@ def download_crx(extension_id: str, out_path: str):
 def crx_to_zip(crx_path: str, zip_path: str):
     with open(crx_path, "rb") as f:
         if f.read(4) != b"Cr24":
-            raise ValueError("Invalid CRX file")
+            raise HTTPException(
+            status_code=400,
+            detail="Invalid extension ID or corrupted CRX file"
+        )
 
         version = struct.unpack("<I", f.read(4))[0]
 
@@ -112,7 +133,10 @@ def crx_to_zip(crx_path: str, zip_path: str):
 def extract_manifest(zip_path: str) -> dict:
     with zipfile.ZipFile(zip_path, "r") as z:
         if "manifest.json" not in z.namelist():
-            raise FileNotFoundError("manifest.json not found")
+            raise HTTPException(
+            status_code=400,
+            detail="Invalid extension package (manifest.json missing)"
+        )
 
         with z.open("manifest.json") as f:
             return json.load(f)
@@ -304,8 +328,14 @@ def analyze_extension(extension_id: str) -> dict:
 def analyze(req: AnalyzeRequest):
     try:
         return analyze_extension(req.extension_id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException as e:
+        raise e
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Extension analysis failed"
+        )
 @app.get("/health")
 def health():
     print("🔥 HEALTH CHECK HIT")
