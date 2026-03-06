@@ -75,12 +75,18 @@ def download_crx(extension_id: str, out_path: str):
     try:
         r = requests.get(url, timeout=20)
 
-        if r.status_code != 200:
+        if r.status_code == 404:
             raise HTTPException(
                 status_code=404,
-                detail="Extension not found in Chrome Web Store"
+                detail=f"Extension {extension_id} not found in Chrome Web Store"
             )
 
+        if r.status_code != 200 or len(r.content) < 100:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid extension ID or CRX download failed"
+            )
+        
         with open(out_path, "wb") as f:
             f.write(r.content)
 
@@ -120,7 +126,10 @@ def crx_to_zip(crx_path: str, zip_path: str):
             f.read(header_size)
 
         else:
-            raise ValueError("Unsupported CRX version")
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported CRX format"
+            )
 
         zip_data = f.read()
 
@@ -328,20 +337,25 @@ def analyze_extension(extension_id: str) -> dict:
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
     try:
-        result = analyze_extension(req.extension_id)
-        return result
+        return analyze_extension(req.extension_id)
 
+    # IMPORTANT: rethrow existing HTTP exceptions
     except HTTPException as e:
-        return JSONResponse(
-            status_code=e.status_code,
-            content={"error": e.detail}
+        raise e
+
+    except zipfile.BadZipFile:
+        raise HTTPException(
+            status_code=400,
+            detail="Downloaded CRX is invalid"
         )
 
     except Exception as e:
-        return JSONResponse(
+        raise HTTPException(
             status_code=500,
-            content={"error": "Extension analysis failed"}
+            detail=f"Unexpected server error: {str(e)}"
         )
+    
+
 @app.get("/health")
 def health():
     print("🔥 HEALTH CHECK HIT")
